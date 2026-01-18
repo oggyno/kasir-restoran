@@ -1,30 +1,28 @@
 // ===========================================
-// KONFIGURASI KEAMANAN
+// KONFIGURASI
 // ===========================================
 
-// GANTI URL INI DENGAN URL GOOGLE APPS SCRIPT ANDA
 const CONFIG = {
-    SHEET_URL: 'https://script.google.com/macros/s/AKfycbz3ZstscYP5tMdaAmIGZqh1p9Ky7RiHiFfNryyJx1pKhM_LP5swP7rISHsg6y4Wehkf1g/exec',
+    SHEET_URL: 'https://script.google.com/macros/s/AKfycbytl0A7JZQl8iKR0_Y1SGx-bZqScj4eMArK1E_DoCupOKCd_8hTZYh7h690RJtMFSAbew/exec', // Ganti dengan URL baru!
     MAX_RETRIES: 3,
-    TIMEOUT: 10000, // 10 detik
-    CACHE_DURATION: 60000 // 1 menit
+    TIMEOUT: 10000,
+    CACHE_DURATION: 60000
 };
 
-// Validasi input untuk mencegah XSS
+// Validasi input
 const sanitizeInput = (input) => {
     const div = document.createElement('div');
     div.textContent = input;
     return div.innerHTML;
 };
 
-// Validasi angka
 const isValidNumber = (value, min = 0) => {
     const num = parseInt(value);
     return !isNaN(num) && num >= min;
 };
 
 // ===========================================
-// PENGELOLAAN STATE
+// STATE MANAGEMENT
 // ===========================================
 
 let currentCache = {
@@ -34,7 +32,7 @@ let currentCache = {
 };
 
 // ===========================================
-// UTILITAS WAKTU
+// UTILITIES
 // ===========================================
 
 const getDateTime = () => {
@@ -52,19 +50,75 @@ const getDateTime = () => {
     return { jam, tanggal };
 };
 
-// ===========================================
-// ALERT SYSTEM
-// ===========================================
-
 const showAlert = (message, isError = false) => {
     const alert = document.getElementById('alert');
     alert.textContent = sanitizeInput(message);
     alert.className = 'alert' + (isError ? ' error' : '');
     alert.style.display = 'block';
+    setTimeout(() => alert.style.display = 'none', 3000);
+};
+
+const formatRupiah = (angka) => {
+    return new Intl.NumberFormat('id-ID', {
+        style: 'currency',
+        currency: 'IDR',
+        minimumFractionDigits: 0
+    }).format(angka);
+};
+
+// ===========================================
+// API CALLS - Sekarang Pakai GET Semua!
+// ===========================================
+
+const saveData = async (data) => {
+    const params = new URLSearchParams({
+        action: 'save',
+        ...data
+    });
     
-    setTimeout(() => {
-        alert.style.display = 'none';
-    }, 3000);
+    const url = `${CONFIG.SHEET_URL}?${params.toString()}`;
+    
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            redirect: 'follow'
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        return await response.json();
+    } catch (error) {
+        console.error('Save error:', error);
+        throw error;
+    }
+};
+
+const fetchData = async (type, tanggal) => {
+    const params = new URLSearchParams({
+        action: 'fetch',
+        type: type,
+        tanggal: tanggal
+    });
+    
+    const url = `${CONFIG.SHEET_URL}?${params.toString()}`;
+    
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            redirect: 'follow'
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        return await response.json();
+    } catch (error) {
+        console.error('Fetch error:', error);
+        throw error;
+    }
 };
 
 // ===========================================
@@ -82,94 +136,19 @@ const initTabs = () => {
 };
 
 const switchTab = (tabName) => {
-    // Update tab buttons
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
     
-    // Update content
     document.querySelectorAll('.content-tab').forEach(c => c.classList.remove('active'));
     document.getElementById(tabName).classList.add('active');
 
-    // Load data jika tab rekap
     if (tabName === 'rekap') {
         muatRekap();
     }
 };
 
 // ===========================================
-// API COMMUNICATION dengan RETRY & TIMEOUT
-// ===========================================
-
-const fetchWithTimeout = async (url, options = {}, timeout = CONFIG.TIMEOUT) => {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-    try {
-        const response = await fetch(url, {
-            ...options,
-            signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        return response;
-    } catch (error) {
-        clearTimeout(timeoutId);
-        if (error.name === 'AbortError') {
-            throw new Error('Request timeout - koneksi terlalu lambat');
-        }
-        throw error;
-    }
-};
-
-const sendDataWithRetry = async (data, retries = CONFIG.MAX_RETRIES) => {
-    for (let i = 0; i < retries; i++) {
-        try {
-            const response = await fetchWithTimeout(CONFIG.SHEET_URL, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(data)
-            });
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            return await response.json();
-        } catch (error) {
-            console.error(`Attempt ${i + 1} failed:`, error);
-            if (i === retries - 1) {
-                throw error;
-            }
-            // Wait sebelum retry (exponential backoff)
-            await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
-        }
-    }
-};
-
-const fetchDataWithRetry = async (type, tanggal, retries = CONFIG.MAX_RETRIES) => {
-    for (let i = 0; i < retries; i++) {
-        try {
-            const url = `${CONFIG.SHEET_URL}?type=${encodeURIComponent(type)}&tanggal=${encodeURIComponent(tanggal)}`;
-            const response = await fetchWithTimeout(url);
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            return await response.json();
-        } catch (error) {
-            console.error(`Fetch attempt ${i + 1} failed:`, error);
-            if (i === retries - 1) {
-                throw error;
-            }
-            await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
-        }
-    }
-};
-
-// ===========================================
-// FORM PEMASUKAN
+// FORM HANDLERS
 // ===========================================
 
 const initFormPemasukan = () => {
@@ -181,7 +160,6 @@ const initFormPemasukan = () => {
         const qty = document.getElementById('quantity').value;
         const metode = document.getElementById('metode').value;
 
-        // Validasi
         if (!menuValue) {
             showAlert('Pilih menu terlebih dahulu!', true);
             return;
@@ -192,7 +170,6 @@ const initFormPemasukan = () => {
             return;
         }
 
-        // Parse menu
         const [nama, hargaStr] = menuValue.split('|');
         const harga = parseInt(hargaStr);
         const qtyNum = parseInt(qty);
@@ -202,43 +179,34 @@ const initFormPemasukan = () => {
 
         const data = {
             type: 'pemasukan',
-            jam: sanitizeInput(jam),
-            tanggal: sanitizeInput(tanggal),
-            nama: sanitizeInput(nama),
+            jam: jam,
+            tanggal: tanggal,
+            nama: nama,
             harga: harga,
             qty: qtyNum,
             total: total,
-            metode: sanitizeInput(metode)
+            metode: metode
         };
 
-        // Disable button
         const submitBtn = form.querySelector('button[type="submit"]');
         submitBtn.disabled = true;
         submitBtn.textContent = '⏳ Menyimpan...';
 
         try {
-            await sendDataWithRetry(data);
+            await saveData(data);
             showAlert('✅ Pemasukan berhasil disimpan!');
-            
-            // Reset form
             form.reset();
             document.getElementById('quantity').value = '1';
-            
-            // Clear cache
             currentCache.pemasukan = null;
         } catch (error) {
             console.error('Error:', error);
-            showAlert('❌ Gagal menyimpan. Periksa koneksi atau URL Apps Script.', true);
+            showAlert('❌ Gagal menyimpan: ' + error.message, true);
         } finally {
             submitBtn.disabled = false;
             submitBtn.textContent = '💰 Simpan Pemasukan';
         }
     });
 };
-
-// ===========================================
-// FORM PENGELUARAN
-// ===========================================
 
 const initFormPengeluaran = () => {
     const form = document.getElementById('formPengeluaran');
@@ -248,7 +216,6 @@ const initFormPengeluaran = () => {
         const harga = document.getElementById('hargaPengeluaran').value;
         const keterangan = document.getElementById('keteranganPengeluaran').value.trim();
 
-        // Validasi
         if (!isValidNumber(harga, 1)) {
             showAlert('Masukkan harga pengeluaran yang valid!', true);
             return;
@@ -259,38 +226,28 @@ const initFormPengeluaran = () => {
             return;
         }
 
-        if (keterangan.length > 200) {
-            showAlert('Keterangan maksimal 200 karakter!', true);
-            return;
-        }
-
         const { jam, tanggal } = getDateTime();
 
         const data = {
             type: 'pengeluaran',
-            jam: sanitizeInput(jam),
-            tanggal: sanitizeInput(tanggal),
+            jam: jam,
+            tanggal: tanggal,
             harga: parseInt(harga),
-            keterangan: sanitizeInput(keterangan)
+            keterangan: keterangan
         };
 
-        // Disable button
         const submitBtn = form.querySelector('button[type="submit"]');
         submitBtn.disabled = true;
         submitBtn.textContent = '⏳ Menyimpan...';
 
         try {
-            await sendDataWithRetry(data);
+            await saveData(data);
             showAlert('✅ Pengeluaran berhasil disimpan!');
-            
-            // Reset form
             form.reset();
-            
-            // Clear cache
             currentCache.pengeluaran = null;
         } catch (error) {
             console.error('Error:', error);
-            showAlert('❌ Gagal menyimpan. Periksa koneksi atau URL Apps Script.', true);
+            showAlert('❌ Gagal menyimpan: ' + error.message, true);
         } finally {
             submitBtn.disabled = false;
             submitBtn.textContent = '💸 Simpan Pengeluaran';
@@ -299,25 +256,12 @@ const initFormPengeluaran = () => {
 };
 
 // ===========================================
-// FORMAT CURRENCY
-// ===========================================
-
-const formatRupiah = (angka) => {
-    return new Intl.NumberFormat('id-ID', {
-        style: 'currency',
-        currency: 'IDR',
-        minimumFractionDigits: 0
-    }).format(angka);
-};
-
-// ===========================================
-// LOAD REKAP DATA
+// REKAP DATA
 // ===========================================
 
 const muatRekap = async () => {
     const { tanggal } = getDateTime();
     
-    // Check cache
     const now = Date.now();
     if (currentCache.timestamp && (now - currentCache.timestamp) < CONFIG.CACHE_DURATION) {
         renderRekap(currentCache.pemasukan, currentCache.pengeluaran);
@@ -329,13 +273,11 @@ const muatRekap = async () => {
     btnRefresh.textContent = '⏳ Loading...';
 
     try {
-        // Parallel fetch untuk performa
         const [dataPemasukan, dataPengeluaran] = await Promise.all([
-            fetchDataWithRetry('pemasukan', tanggal),
-            fetchDataWithRetry('pengeluaran', tanggal)
+            fetchData('pemasukan', tanggal),
+            fetchData('pengeluaran', tanggal)
         ]);
 
-        // Update cache
         currentCache = {
             pemasukan: dataPemasukan,
             pengeluaran: dataPengeluaran,
@@ -346,7 +288,7 @@ const muatRekap = async () => {
         showAlert('✅ Data berhasil dimuat!');
     } catch (error) {
         console.error('Error:', error);
-        showAlert('❌ Gagal memuat data. ' + error.message, true);
+        showAlert('❌ Gagal memuat data: ' + error.message, true);
     } finally {
         btnRefresh.disabled = false;
         btnRefresh.textContent = '🔄 Refresh Data';
@@ -354,7 +296,6 @@ const muatRekap = async () => {
 };
 
 const renderRekap = (dataPemasukan, dataPengeluaran) => {
-    // Render Tabel Pemasukan
     const tbody1 = document.getElementById('tabelPemasukan');
     tbody1.innerHTML = '';
     
@@ -379,7 +320,6 @@ const renderRekap = (dataPemasukan, dataPengeluaran) => {
         tbody1.innerHTML = '<tr><td colspan="7" class="empty-state">Belum ada data</td></tr>';
     }
 
-    // Render Tabel Pengeluaran
     const tbody2 = document.getElementById('tabelPengeluaran');
     tbody2.innerHTML = '';
     
@@ -401,20 +341,14 @@ const renderRekap = (dataPemasukan, dataPengeluaran) => {
         tbody2.innerHTML = '<tr><td colspan="4" class="empty-state">Belum ada data</td></tr>';
     }
 
-    // Update Summary
     const saldoBersih = totalPemasukan - totalPengeluaran;
     
     document.getElementById('totalPemasukan').textContent = formatRupiah(totalPemasukan);
     document.getElementById('totalPengeluaran').textContent = formatRupiah(totalPengeluaran);
     document.getElementById('saldoBersih').textContent = formatRupiah(saldoBersih);
     
-    // Update warna saldo (merah jika minus)
     const saldoElement = document.getElementById('saldoBersih');
-    if (saldoBersih < 0) {
-        saldoElement.style.color = '#ff6b6b';
-    } else {
-        saldoElement.style.color = '#c0c0c0';
-    }
+    saldoElement.style.color = saldoBersih < 0 ? '#ff6b6b' : '#c0c0c0';
 };
 
 // ===========================================
@@ -422,22 +356,18 @@ const renderRekap = (dataPemasukan, dataPengeluaran) => {
 // ===========================================
 
 const checkConfig = () => {
-    if (CONFIG.SHEET_URL === 'YOUR_GOOGLE_APPS_SCRIPT_URL') {
+    if (CONFIG.SHEET_URL === 'PASTE_URL_APPS_SCRIPT_BARU_DISINI') {
         showAlert('⚠️ Mohon setup Google Apps Script URL terlebih dahulu!', true);
         return false;
     }
     return true;
 };
 
-// Init saat DOM ready
 document.addEventListener('DOMContentLoaded', () => {
     checkConfig();
     initTabs();
     initFormPemasukan();
     initFormPengeluaran();
-    
-    // Event listener untuk refresh button
     document.getElementById('btnRefresh').addEventListener('click', muatRekap);
-    
     console.log('✅ Sistem Kasir siap digunakan');
 });
