@@ -3,7 +3,7 @@
 // ===========================================
 
 const CONFIG = {
-    APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbyFj-WOvMCPmyd2WvewOIV-Vy8gH2qzJh9_vu7Ohp3XlCiHnQVqtwL1otpnBj3Mjq-Bhg/exec'
+    APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbwhtNG4bENICUZE6U1TQIjCnqCwXSf38Ce_jGYq0nYpLYo3ufvLTZxdPnYsaFHfeYxqGg/exec'
 };
 
 // ===========================================
@@ -320,3 +320,4 @@ document.addEventListener('DOMContentLoaded', () => {
         showAlert('⚠️ Setup Apps Script URL!', true);
     }
 });
+
