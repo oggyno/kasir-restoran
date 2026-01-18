@@ -1,15 +1,20 @@
 // ===========================================
-// KONFIGURASI
+// KONFIGURASI - GANTI INI!
 // ===========================================
 
 const CONFIG = {
-    SHEET_URL: 'https://script.google.com/macros/s/AKfycbytl0A7JZQl8iKR0_Y1SGx-bZqScj4eMArK1E_DoCupOKCd_8hTZYh7h690RJtMFSAbew/exec', // Ganti dengan URL baru!
-    MAX_RETRIES: 3,
-    TIMEOUT: 10000,
-    CACHE_DURATION: 60000
+    API_KEY: 'AIzaSyDkRN-c4Fw2IzY2jru2PvcfP9hTHalSHwI',
+    SPREADSHEET_ID: '18FvSrYzmIgOcyIIDiS0EBIPzFMAU69kx3aQnRXFOJIU',
+    SHEET_PEMASUKAN: 'Pemasukan',
+    SHEET_PENGELUARAN: 'Pengeluaran'
 };
 
-// Validasi input
+const SHEETS_API_BASE = 'https://sheets.googleapis.com/v4/spreadsheets';
+
+// ===========================================
+// UTILITIES
+// ===========================================
+
 const sanitizeInput = (input) => {
     const div = document.createElement('div');
     div.textContent = input;
@@ -20,20 +25,6 @@ const isValidNumber = (value, min = 0) => {
     const num = parseInt(value);
     return !isNaN(num) && num >= min;
 };
-
-// ===========================================
-// STATE MANAGEMENT
-// ===========================================
-
-let currentCache = {
-    pemasukan: null,
-    pengeluaran: null,
-    timestamp: null
-};
-
-// ===========================================
-// UTILITIES
-// ===========================================
 
 const getDateTime = () => {
     const now = new Date();
@@ -67,62 +58,89 @@ const formatRupiah = (angka) => {
 };
 
 // ===========================================
-// API CALLS - Sekarang Pakai GET Semua!
+// GOOGLE SHEETS API CALLS
 // ===========================================
 
-const saveData = async (data) => {
-    const params = new URLSearchParams({
-        action: 'save',
-        ...data
+const appendToSheet = async (sheetName, values) => {
+    const url = `${SHEETS_API_BASE}/${CONFIG.SPREADSHEET_ID}/values/${sheetName}:append?valueInputOption=RAW&key=${CONFIG.API_KEY}`;
+    
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            values: [values]
+        })
     });
-    
-    const url = `${CONFIG.SHEET_URL}?${params.toString()}`;
-    
-    try {
-        const response = await fetch(url, {
-            method: 'GET',
-            redirect: 'follow'
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        return await response.json();
-    } catch (error) {
-        console.error('Save error:', error);
-        throw error;
+
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error.message || 'Failed to save data');
     }
+
+    return await response.json();
 };
 
-const fetchData = async (type, tanggal) => {
-    const params = new URLSearchParams({
-        action: 'fetch',
-        type: type,
-        tanggal: tanggal
+const getSheetData = async (sheetName) => {
+    const url = `${SHEETS_API_BASE}/${CONFIG.SPREADSHEET_ID}/values/${sheetName}?key=${CONFIG.API_KEY}`;
+    
+    const response = await fetch(url, {
+        method: 'GET'
     });
-    
-    const url = `${CONFIG.SHEET_URL}?${params.toString()}`;
-    
-    try {
-        const response = await fetch(url, {
-            method: 'GET',
-            redirect: 'follow'
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        return await response.json();
-    } catch (error) {
-        console.error('Fetch error:', error);
-        throw error;
+
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error.message || 'Failed to fetch data');
     }
+
+    const data = await response.json();
+    return data.values || [];
 };
 
 // ===========================================
-// TAB NAVIGATION
+// BUSINESS LOGIC
+// ===========================================
+
+const savePemasukan = async (data) => {
+    const row = [
+        data.jam,
+        data.tanggal,
+        data.nama,
+        data.harga,
+        data.qty,
+        data.total,
+        data.metode
+    ];
+    
+    await appendToSheet(CONFIG.SHEET_PEMASUKAN, row);
+};
+
+const savePengeluaran = async (data) => {
+    const row = [
+        data.jam,
+        data.tanggal,
+        data.harga,
+        data.keterangan
+    ];
+    
+    await appendToSheet(CONFIG.SHEET_PENGELUARAN, row);
+};
+
+const getPemasukan = async (tanggal) => {
+    const data = await getSheetData(CONFIG.SHEET_PEMASUKAN);
+    // Skip header (row 0) and filter by date
+    return data.slice(1).filter(row => row[1] === tanggal);
+};
+
+const getPengeluaran = async (tanggal) => {
+    const data = await getSheetData(CONFIG.SHEET_PENGELUARAN);
+    // Skip header (row 0) and filter by date
+    return data.slice(1).filter(row => row[1] === tanggal);
+};
+
+// ===========================================
+// UI HANDLERS
 // ===========================================
 
 const initTabs = () => {
@@ -146,10 +164,6 @@ const switchTab = (tabName) => {
         muatRekap();
     }
 };
-
-// ===========================================
-// FORM HANDLERS
-// ===========================================
 
 const initFormPemasukan = () => {
     const form = document.getElementById('formPemasukan');
@@ -178,14 +192,8 @@ const initFormPemasukan = () => {
         const { jam, tanggal } = getDateTime();
 
         const data = {
-            type: 'pemasukan',
-            jam: jam,
-            tanggal: tanggal,
-            nama: nama,
-            harga: harga,
-            qty: qtyNum,
-            total: total,
-            metode: metode
+            jam, tanggal, nama, harga,
+            qty: qtyNum, total, metode
         };
 
         const submitBtn = form.querySelector('button[type="submit"]');
@@ -193,11 +201,10 @@ const initFormPemasukan = () => {
         submitBtn.textContent = '⏳ Menyimpan...';
 
         try {
-            await saveData(data);
+            await savePemasukan(data);
             showAlert('✅ Pemasukan berhasil disimpan!');
             form.reset();
             document.getElementById('quantity').value = '1';
-            currentCache.pemasukan = null;
         } catch (error) {
             console.error('Error:', error);
             showAlert('❌ Gagal menyimpan: ' + error.message, true);
@@ -229,11 +236,9 @@ const initFormPengeluaran = () => {
         const { jam, tanggal } = getDateTime();
 
         const data = {
-            type: 'pengeluaran',
-            jam: jam,
-            tanggal: tanggal,
+            jam, tanggal,
             harga: parseInt(harga),
-            keterangan: keterangan
+            keterangan
         };
 
         const submitBtn = form.querySelector('button[type="submit"]');
@@ -241,10 +246,9 @@ const initFormPengeluaran = () => {
         submitBtn.textContent = '⏳ Menyimpan...';
 
         try {
-            await saveData(data);
+            await savePengeluaran(data);
             showAlert('✅ Pengeluaran berhasil disimpan!');
             form.reset();
-            currentCache.pengeluaran = null;
         } catch (error) {
             console.error('Error:', error);
             showAlert('❌ Gagal menyimpan: ' + error.message, true);
@@ -255,18 +259,8 @@ const initFormPengeluaran = () => {
     });
 };
 
-// ===========================================
-// REKAP DATA
-// ===========================================
-
 const muatRekap = async () => {
     const { tanggal } = getDateTime();
-    
-    const now = Date.now();
-    if (currentCache.timestamp && (now - currentCache.timestamp) < CONFIG.CACHE_DURATION) {
-        renderRekap(currentCache.pemasukan, currentCache.pengeluaran);
-        return;
-    }
 
     const btnRefresh = document.getElementById('btnRefresh');
     btnRefresh.disabled = true;
@@ -274,15 +268,9 @@ const muatRekap = async () => {
 
     try {
         const [dataPemasukan, dataPengeluaran] = await Promise.all([
-            fetchData('pemasukan', tanggal),
-            fetchData('pengeluaran', tanggal)
+            getPemasukan(tanggal),
+            getPengeluaran(tanggal)
         ]);
-
-        currentCache = {
-            pemasukan: dataPemasukan,
-            pengeluaran: dataPengeluaran,
-            timestamp: Date.now()
-        };
 
         renderRekap(dataPemasukan, dataPengeluaran);
         showAlert('✅ Data berhasil dimuat!');
@@ -305,13 +293,13 @@ const renderRekap = (dataPemasukan, dataPengeluaran) => {
         dataPemasukan.forEach(row => {
             const tr = document.createElement('tr');
             tr.innerHTML = `
-                <td>${sanitizeInput(String(row[0]))}</td>
-                <td>${sanitizeInput(String(row[1]))}</td>
-                <td>${sanitizeInput(String(row[2]))}</td>
-                <td>${formatRupiah(row[3])}</td>
-                <td>${sanitizeInput(String(row[4]))}</td>
-                <td>${formatRupiah(row[5])}</td>
-                <td>${sanitizeInput(String(row[6]))}</td>
+                <td>${sanitizeInput(String(row[0] || ''))}</td>
+                <td>${sanitizeInput(String(row[1] || ''))}</td>
+                <td>${sanitizeInput(String(row[2] || ''))}</td>
+                <td>${formatRupiah(Number(row[3]) || 0)}</td>
+                <td>${sanitizeInput(String(row[4] || ''))}</td>
+                <td>${formatRupiah(Number(row[5]) || 0)}</td>
+                <td>${sanitizeInput(String(row[6] || ''))}</td>
             `;
             tbody1.appendChild(tr);
             totalPemasukan += Number(row[5]) || 0;
@@ -329,10 +317,10 @@ const renderRekap = (dataPemasukan, dataPengeluaran) => {
         dataPengeluaran.forEach(row => {
             const tr = document.createElement('tr');
             tr.innerHTML = `
-                <td>${sanitizeInput(String(row[0]))}</td>
-                <td>${sanitizeInput(String(row[1]))}</td>
-                <td>${formatRupiah(row[2])}</td>
-                <td>${sanitizeInput(String(row[3]))}</td>
+                <td>${sanitizeInput(String(row[0] || ''))}</td>
+                <td>${sanitizeInput(String(row[1] || ''))}</td>
+                <td>${formatRupiah(Number(row[2]) || 0)}</td>
+                <td>${sanitizeInput(String(row[3] || ''))}</td>
             `;
             tbody2.appendChild(tr);
             totalPengeluaran += Number(row[2]) || 0;
@@ -351,23 +339,14 @@ const renderRekap = (dataPemasukan, dataPengeluaran) => {
     saldoElement.style.color = saldoBersih < 0 ? '#ff6b6b' : '#c0c0c0';
 };
 
-// ===========================================
-// INITIALIZATION
-// ===========================================
-
-const checkConfig = () => {
-    if (CONFIG.SHEET_URL === 'PASTE_URL_APPS_SCRIPT_BARU_DISINI') {
-        showAlert('⚠️ Mohon setup Google Apps Script URL terlebih dahulu!', true);
-        return false;
-    }
-    return true;
-};
-
 document.addEventListener('DOMContentLoaded', () => {
-    checkConfig();
-    initTabs();
-    initFormPemasukan();
-    initFormPengeluaran();
-    document.getElementById('btnRefresh').addEventListener('click', muatRekap);
-    console.log('✅ Sistem Kasir siap digunakan');
+    if (!CONFIG.API_KEY.includes('PASTE')) {
+        initTabs();
+        initFormPemasukan();
+        initFormPengeluaran();
+        document.getElementById('btnRefresh').addEventListener('click', muatRekap);
+        console.log('✅ Sistem Kasir siap - Google Sheets API (NO CORS!)');
+    } else {
+        showAlert('⚠️ Setup API Key & Spreadsheet ID terlebih dahulu!', true);
+    }
 });
