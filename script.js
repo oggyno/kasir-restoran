@@ -1,15 +1,10 @@
 // ===========================================
-// KONFIGURASI - GANTI INI!
+// KONFIGURASI
 // ===========================================
 
 const CONFIG = {
-    API_KEY: 'AIzaSyDkRN-c4Fw2IzY2jru2PvcfP9hTHalSHwI',
-    SPREADSHEET_ID: '18FvSrYzmIgOcyIIDiS0EBIPzFMAU69kx3aQnRXFOJIU',
-    SHEET_PEMASUKAN: 'Pemasukan',
-    SHEET_PENGELUARAN: 'Pengeluaran'
+    APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbyFj-WOvMCPmyd2WvewOIV-Vy8gH2qzJh9_vu7Ohp3XlCiHnQVqtwL1otpnBj3Mjq-Bhg/exec'
 };
-
-const SHEETS_API_BASE = 'https://sheets.googleapis.com/v4/spreadsheets';
 
 // ===========================================
 // UTILITIES
@@ -58,85 +53,56 @@ const formatRupiah = (angka) => {
 };
 
 // ===========================================
-// GOOGLE SHEETS API CALLS
+// FORM SUBMISSION - NO CORS!
 // ===========================================
 
-const appendToSheet = async (sheetName, values) => {
-    const url = `${SHEETS_API_BASE}/${CONFIG.SPREADSHEET_ID}/values/${sheetName}:append?valueInputOption=RAW&key=${CONFIG.API_KEY}`;
-    
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            values: [values]
-        })
+const submitFormData = (data) => {
+    return new Promise((resolve, reject) => {
+        // Create hidden iframe
+        const iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        iframe.name = 'hidden_iframe_' + Date.now();
+        document.body.appendChild(iframe);
+
+        // Create form
+        const form = document.createElement('form');
+        form.action = CONFIG.APPS_SCRIPT_URL;
+        form.method = 'POST';
+        form.target = iframe.name;
+
+        // Add form fields
+        Object.keys(data).forEach(key => {
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = key;
+            input.value = data[key];
+            form.appendChild(input);
+        });
+
+        document.body.appendChild(form);
+
+        // Handle response
+        iframe.onload = () => {
+            setTimeout(() => {
+                document.body.removeChild(form);
+                document.body.removeChild(iframe);
+                resolve({ status: 'success' });
+            }, 1000);
+        };
+
+        // Submit form
+        form.submit();
     });
+};
 
+const fetchData = async (type, tanggal) => {
+    const url = `${CONFIG.APPS_SCRIPT_URL}?action=fetch&type=${type}&tanggal=${encodeURIComponent(tanggal)}`;
+    
+    const response = await fetch(url);
     if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error.message || 'Failed to save data');
+        throw new Error('Failed to fetch data');
     }
-
     return await response.json();
-};
-
-const getSheetData = async (sheetName) => {
-    const url = `${SHEETS_API_BASE}/${CONFIG.SPREADSHEET_ID}/values/${sheetName}?key=${CONFIG.API_KEY}`;
-    
-    const response = await fetch(url, {
-        method: 'GET'
-    });
-
-    if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error.message || 'Failed to fetch data');
-    }
-
-    const data = await response.json();
-    return data.values || [];
-};
-
-// ===========================================
-// BUSINESS LOGIC
-// ===========================================
-
-const savePemasukan = async (data) => {
-    const row = [
-        data.jam,
-        data.tanggal,
-        data.nama,
-        data.harga,
-        data.qty,
-        data.total,
-        data.metode
-    ];
-    
-    await appendToSheet(CONFIG.SHEET_PEMASUKAN, row);
-};
-
-const savePengeluaran = async (data) => {
-    const row = [
-        data.jam,
-        data.tanggal,
-        data.harga,
-        data.keterangan
-    ];
-    
-    await appendToSheet(CONFIG.SHEET_PENGELUARAN, row);
-};
-
-const getPemasukan = async (tanggal) => {
-    const data = await getSheetData(CONFIG.SHEET_PEMASUKAN);
-    // Skip header (row 0) and filter by date
-    return data.slice(1).filter(row => row[1] === tanggal);
-};
-
-const getPengeluaran = async (tanggal) => {
-    const data = await getSheetData(CONFIG.SHEET_PENGELUARAN);
-    // Skip header (row 0) and filter by date
-    return data.slice(1).filter(row => row[1] === tanggal);
 };
 
 // ===========================================
@@ -192,8 +158,10 @@ const initFormPemasukan = () => {
         const { jam, tanggal } = getDateTime();
 
         const data = {
-            jam, tanggal, nama, harga,
-            qty: qtyNum, total, metode
+            action: 'save',
+            type: 'pemasukan',
+            jam, tanggal, nama,
+            harga, qty: qtyNum, total, metode
         };
 
         const submitBtn = form.querySelector('button[type="submit"]');
@@ -201,7 +169,7 @@ const initFormPemasukan = () => {
         submitBtn.textContent = '⏳ Menyimpan...';
 
         try {
-            await savePemasukan(data);
+            await submitFormData(data);
             showAlert('✅ Pemasukan berhasil disimpan!');
             form.reset();
             document.getElementById('quantity').value = '1';
@@ -236,6 +204,8 @@ const initFormPengeluaran = () => {
         const { jam, tanggal } = getDateTime();
 
         const data = {
+            action: 'save',
+            type: 'pengeluaran',
             jam, tanggal,
             harga: parseInt(harga),
             keterangan
@@ -246,7 +216,7 @@ const initFormPengeluaran = () => {
         submitBtn.textContent = '⏳ Menyimpan...';
 
         try {
-            await savePengeluaran(data);
+            await submitFormData(data);
             showAlert('✅ Pengeluaran berhasil disimpan!');
             form.reset();
         } catch (error) {
@@ -268,8 +238,8 @@ const muatRekap = async () => {
 
     try {
         const [dataPemasukan, dataPengeluaran] = await Promise.all([
-            getPemasukan(tanggal),
-            getPengeluaran(tanggal)
+            fetchData('pemasukan', tanggal),
+            fetchData('pengeluaran', tanggal)
         ]);
 
         renderRekap(dataPemasukan, dataPengeluaran);
@@ -340,13 +310,13 @@ const renderRekap = (dataPemasukan, dataPengeluaran) => {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-    if (!CONFIG.API_KEY.includes('PASTE')) {
+    if (!CONFIG.APPS_SCRIPT_URL.includes('PASTE')) {
         initTabs();
         initFormPemasukan();
         initFormPengeluaran();
         document.getElementById('btnRefresh').addEventListener('click', muatRekap);
-        console.log('✅ Sistem Kasir siap - Google Sheets API (NO CORS!)');
+        console.log('✅ Sistem Kasir - Form Submission Method (NO CORS!)');
     } else {
-        showAlert('⚠️ Setup API Key & Spreadsheet ID terlebih dahulu!', true);
+        showAlert('⚠️ Setup Apps Script URL!', true);
     }
 });
